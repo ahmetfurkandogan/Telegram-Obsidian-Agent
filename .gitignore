@@ -13,4 +13,5 @@ dist/
 build/
 *.egg-info/
 .superpowers/
+.worktrees/
 .DS_Store
