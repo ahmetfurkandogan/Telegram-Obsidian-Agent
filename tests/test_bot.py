@@ -1,6 +1,4 @@
 import asyncio
-import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from telegram_obsidian_agent.bot import BotService
@@ -44,11 +42,6 @@ class FakeMessage:
         self.replies.append((text, reply_markup))
 
 
-class FailingReplyMessage(FakeMessage):
-    async def reply_text(self, text, reply_markup=None):
-        raise RuntimeError("telegram unavailable")
-
-
 class FakeChat:
     def __init__(self, chat_id: int):
         self.id = chat_id
@@ -59,21 +52,6 @@ class FakeUpdate:
         self.effective_chat = FakeChat(chat_id)
         self.effective_message = message
         self.callback_query = None
-
-
-class FakeCallback:
-    def __init__(self, data: str):
-        self.data = data
-        self.answers = []
-
-    async def answer(self, text=None):
-        self.answers.append(text)
-
-
-class FakeCallbackUpdate:
-    def __init__(self, chat_id: int, data: str):
-        self.effective_chat = FakeChat(chat_id)
-        self.callback_query = FakeCallback(data)
 
 
 class FakeStager:
@@ -147,17 +125,18 @@ def make_service(tmp_path: Path, source_type: str = "pdf", *, ttl: int = 900, bo
     return service, obsidian
 
 
-def test_pdf_message_creates_preview_with_save_and_cancel_buttons(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path)
+def test_pdf_message_saves_directly_without_confirmation(tmp_path: Path) -> None:
+    service, obsidian = make_service(tmp_path)
     message = FakeMessage(document=object())
 
     asyncio.run(service.handle_message(FakeUpdate(123, message)))
 
     assert len(message.replies) == 1
-    text, keyboard = message.replies[0]
-    assert "Generated title" in text
-    assert "Kaydet" in str(keyboard)
-    assert "İptal" in str(keyboard)
+    text, reply_markup = message.replies[0]
+    assert text == "Kaydedildi: Generated title"
+    assert reply_markup is None
+    assert obsidian.attachment_calls == 1
+    assert obsidian.note_calls == 1
 
 
 def test_message_handler_accepts_telegram_context_argument(tmp_path: Path) -> None:
@@ -170,32 +149,38 @@ def test_message_handler_accepts_telegram_context_argument(tmp_path: Path) -> No
 
 
 def test_voice_message_routes_to_transcription(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path, source_type="voice")
+    service, obsidian = make_service(tmp_path, source_type="voice")
     message = FakeMessage(voice=object())
 
     asyncio.run(service.handle_message(FakeUpdate(123, message)))
 
-    assert "Generated summary" in message.replies[0][0]
+    assert message.replies[0][0] == "Kaydedildi: Generated title"
+    assert obsidian.attachment_calls == 1
+    assert obsidian.note_calls == 1
 
 
 def test_analyzer_failure_keeps_extracted_content_captureable(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path)
+    service, obsidian = make_service(tmp_path)
     service.analyzer = FailingAnalyzer()
     message = FakeMessage(document=object())
 
     asyncio.run(service.handle_message(FakeUpdate(123, message)))
 
-    assert "AI analysis unavailable" in message.replies[0][0]
+    assert message.replies[0][0].startswith("Kaydedildi:")
+    assert obsidian.attachment_calls == 1
+    assert obsidian.note_calls == 1
 
 
 def test_transcriber_failure_keeps_voice_captureable(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path, source_type="voice")
+    service, obsidian = make_service(tmp_path, source_type="voice")
     service.transcriber = FailingTranscriber()
     message = FakeMessage(voice=object())
 
     asyncio.run(service.handle_message(FakeUpdate(123, message)))
 
-    assert "No extractable text" in message.replies[0][0]
+    assert message.replies[0][0].startswith("Kaydedildi:")
+    assert obsidian.attachment_calls == 1
+    assert obsidian.note_calls == 1
 
 
 def test_unauthorized_chat_is_ignored(tmp_path: Path) -> None:
@@ -207,87 +192,22 @@ def test_unauthorized_chat_is_ignored(tmp_path: Path) -> None:
     assert message.replies == []
 
 
-def test_preview_is_truncated_for_telegram(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path, body="x" * 12000)
-    message = FakeMessage(document=object())
-
-    asyncio.run(service.handle_message(FakeUpdate(123, message)))
-
-    assert len(message.replies[0][0]) <= 3500
-    assert "truncated" in message.replies[0][0].lower()
-
-
-def test_save_callback_writes_once_and_repeated_callback_is_harmless(tmp_path: Path) -> None:
-    service, obsidian = make_service(tmp_path)
-    message = FakeMessage(document=object())
-    asyncio.run(service.handle_message(FakeUpdate(123, message)))
-    callback_data = message.replies[0][1].inline_keyboard[0][0].callback_data
-
-    first = FakeCallbackUpdate(123, callback_data)
-    second = FakeCallbackUpdate(123, callback_data)
-    asyncio.run(service.handle_callback(first))
-    asyncio.run(service.handle_callback(second))
-
-    assert obsidian.attachment_calls == 1
-    assert obsidian.note_calls == 1
-
-
-def test_cancel_callback_prevents_writes(tmp_path: Path) -> None:
-    service, obsidian = make_service(tmp_path)
-    message = FakeMessage(document=object())
-    asyncio.run(service.handle_message(FakeUpdate(123, message)))
-    callback_data = message.replies[0][1].inline_keyboard[0][1].callback_data
-
-    asyncio.run(service.handle_callback(FakeCallbackUpdate(123, callback_data)))
-
-    assert obsidian.attachment_calls == 0
-    assert obsidian.note_calls == 0
-
-
-def test_expired_capture_does_not_write(tmp_path: Path) -> None:
-    service, obsidian = make_service(tmp_path, ttl=0)
-    message = FakeMessage(document=object())
-    asyncio.run(service.handle_message(FakeUpdate(123, message)))
-    callback_data = message.replies[0][1].inline_keyboard[0][0].callback_data
-
-    asyncio.run(service.handle_callback(FakeCallbackUpdate(123, callback_data)))
-
-    assert obsidian.note_calls == 0
-
-
-def test_failed_note_write_keeps_capture_retryable(tmp_path: Path) -> None:
+def test_failed_direct_write_keeps_capture_retryable(tmp_path: Path) -> None:
     service, obsidian = make_service(tmp_path)
     obsidian.fail_note_once = True
     message = FakeMessage(document=object())
     asyncio.run(service.handle_message(FakeUpdate(123, message)))
-    callback_data = message.replies[0][1].inline_keyboard[0][0].callback_data
 
-    asyncio.run(service.handle_callback(FakeCallbackUpdate(123, callback_data)))
-    asyncio.run(service.handle_callback(FakeCallbackUpdate(123, callback_data)))
+    assert "başarısız" in message.replies[0][0]
+    with service.store._connect() as connection:
+        capture_id = connection.execute("SELECT id FROM captures ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+    capture = service.store.get(capture_id)
+    assert capture.status == "pending"
+    assert Path(capture.staged_path).exists()
+
+    asyncio.run(service._save_capture(capture_id))
 
     assert obsidian.attachment_calls == 2
     assert obsidian.note_calls == 2
-
-
-def test_cleanup_expired_removes_only_expired_staged_files(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path, ttl=0)
-    message = FakeMessage(document=object())
-    asyncio.run(service.handle_message(FakeUpdate(123, message)))
-    capture_id = message.replies[0][1].inline_keyboard[0][0].callback_data.split(":", 1)[1]
-    staged_path = Path(service.store.get(capture_id).staged_path)
-    assert staged_path.exists()
-
-    service.cleanup_expired()
-
-    assert not staged_path.exists()
-
-
-def test_failed_preview_delivery_cancels_pending_capture(tmp_path: Path) -> None:
-    service, _ = make_service(tmp_path)
-    cancelled = []
-    original_mark_cancelled = service.store.mark_cancelled
-    service.store.mark_cancelled = lambda capture_id: cancelled.append(capture_id) or original_mark_cancelled(capture_id)
-
-    asyncio.run(service.handle_message(FakeUpdate(123, FailingReplyMessage(document=object()))))
-
-    assert len(cancelled) == 1
+    assert service.store.get(capture_id).status == "saved"
+    assert not Path(capture.staged_path).exists()

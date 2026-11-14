@@ -6,11 +6,10 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from .config import Settings
-from .markdown import build_preview, build_vault_paths, render_note
+from .markdown import build_vault_paths, render_note
 from .models import Analysis, Capture
 from .security import assert_allowed_chat
 from .storage import PendingStore
@@ -60,6 +59,8 @@ class BotService:
         item = getattr(message, "document", None) or getattr(message, "voice", None)
         if item is None:
             return
+        staged = None
+        capture = None
         try:
             staged = await self.stager.download(item, self.settings.staging_dir)
             source_type = str(staged.source_type)
@@ -92,27 +93,26 @@ class BotService:
                 created_at=now,
                 expires_at=now + timedelta(seconds=self.settings.pending_ttl_seconds),
             )
-            rendered = render_note(analysis, capture, now, self.settings.obsidian_folder)
             self.store.create(capture)
-            keyboard = InlineKeyboardMarkup(
-                [[
-                    InlineKeyboardButton("Kaydet", callback_data=f"save:{capture_id}"),
-                    InlineKeyboardButton("İptal", callback_data=f"cancel:{capture_id}"),
-                ]]
-            )
-            await message.reply_text(build_preview(analysis, capture, 3500), reply_markup=keyboard)
+            try:
+                await self._save_capture(capture.id)
+            except Exception as exc:
+                logger.error(
+                    "capture save failed: %s: %s",
+                    type(exc).__name__,
+                    str(exc).replace(self.settings.telegram_bot_token, "<redacted>"),
+                )
+                await message.reply_text("Dosya alındı ancak Obsidian kaydı başarısız oldu. Yerel bekleyen kayıt korunuyor.")
+                return
+            await message.reply_text(f"Kaydedildi: {analysis.title}")
         except Exception as exc:
             logger.error(
                 "message processing failed: %s: %s",
                 type(exc).__name__,
                 str(exc).replace(self.settings.telegram_bot_token, "<redacted>"),
             )
-            capture = locals().get("capture")
-            if capture is not None:
-                self.store.mark_cancelled(capture.id)
-            staged_path = locals().get("staged")
-            if staged_path is not None:
-                staged_path.path.unlink(missing_ok=True)
+            if capture is None and staged is not None:
+                staged.path.unlink(missing_ok=True)
             try:
                 await message.reply_text("İşlenemedi. Dosya türü, boyutu veya sağlayıcı bağlantısını kontrol edin.")
             except Exception:
@@ -136,62 +136,30 @@ class BotService:
                 body=extracted_text,
             )
 
-    async def handle_callback(self, update) -> None:
-        chat_id = update.effective_chat.id
-        query = update.callback_query
-        try:
-            assert_allowed_chat(chat_id, self.settings.telegram_allowed_chat_id)
-        except PermissionError:
-            return
-        try:
-            action, capture_id = query.data.split(":", 1)
-        except ValueError:
-            await query.answer("Geçersiz işlem")
-            return
-        capture = self.store.get(capture_id)
-        if capture is None:
-            await query.answer("Kayıt bulunamadı")
-            return
-        if action == "cancel":
-            if self.store.mark_cancelled(capture_id):
-                Path(capture.staged_path).unlink(missing_ok=True)
-                await query.answer("İptal edildi")
-            else:
-                await query.answer("Kayıt zaten işlendi")
-            return
-        if action != "save":
-            await query.answer("Geçersiz işlem")
-            return
+    async def _save_capture(self, capture_id: str) -> None:
         async with self._save_lock:
             capture = self.store.get(capture_id)
             if capture is None or capture.status != "pending":
-                await query.answer("Kayıt zaten işlendi")
-                return
+                raise RuntimeError("capture is not pending")
             now = datetime.now(timezone.utc)
             if capture.expires_at <= now:
                 self.store.expire(now)
                 Path(capture.staged_path).unlink(missing_ok=True)
-                await query.answer("Önizleme süresi doldu")
-                return
-            try:
-                analysis = Analysis(**json.loads(capture.analysis_json))
-                rendered = render_note(analysis, capture, capture.created_at, self.settings.obsidian_folder)
-                await asyncio.to_thread(
-                    self.obsidian.write_attachment,
-                    rendered,
-                    Path(capture.staged_path),
-                    capture.mime_type,
-                    capture.content_sha256,
-                )
-                await asyncio.to_thread(self.obsidian.write_note, rendered)
-            except Exception:
-                await query.answer("Kaydedilemedi. Tekrar deneyin.")
-                return
+                raise RuntimeError("capture expired")
+            analysis = Analysis(**json.loads(capture.analysis_json))
+            rendered = render_note(analysis, capture, capture.created_at, self.settings.obsidian_folder)
+            await asyncio.to_thread(
+                self.obsidian.write_attachment,
+                rendered,
+                Path(capture.staged_path),
+                capture.mime_type,
+                capture.content_sha256,
+            )
+            await asyncio.to_thread(self.obsidian.write_note, rendered)
             if self.store.mark_saved(capture_id):
                 Path(capture.staged_path).unlink(missing_ok=True)
-                await query.answer("Kaydedildi")
-            else:
-                await query.answer("Kayıt zaten işlendi")
+                return
+            raise RuntimeError("capture was saved by another worker")
 
 
 def build_application(settings: Settings, store: PendingStore, stager, extractor, transcriber, analyzer, obsidian) -> Application:
@@ -226,9 +194,8 @@ def build_application(settings: Settings, store: PendingStore, stager, extractor
             assert_allowed_chat(update.effective_chat.id, settings.telegram_allowed_chat_id)
         except PermissionError:
             return
-        await update.effective_message.reply_text("PDF veya ses mesajı gönderin. Önizlemeden sonra Kaydet seçin.")
+        await update.effective_message.reply_text("PDF veya ses mesajı gönderin. Dosyalar otomatik kaydedilir.")
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.Document.ALL | filters.VOICE, service.handle_message))
-    application.add_handler(CallbackQueryHandler(service.handle_callback, pattern=r"^(save|cancel):[A-Za-z0-9]+$"))
     return application

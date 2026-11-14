@@ -2,7 +2,7 @@
 
 ## Intent
 
-Build a single-user, local Telegram bot that turns PDF and voice messages into searchable Obsidian notes. The bot preserves the original attachment, extracts useful text, generates a title/summary/tags, shows a preview, and writes to the vault only after explicit confirmation.
+Build a single-user, local Telegram bot that turns PDF and voice messages into searchable Obsidian notes. The bot preserves the original attachment, extracts useful text, generates a title/summary/tags, writes to the vault immediately, and sends a completion confirmation.
 
 ## Goals
 
@@ -11,8 +11,8 @@ Build a single-user, local Telegram bot that turns PDF and voice messages into s
 - Extract bounded text from PDFs.
 - Transcribe voice messages through a configured transcription API.
 - Generate a structured title, summary, tags, and body from extracted text.
-- Show the generated note and attachment preview in Telegram.
-- Require `Kaydet` confirmation before any vault write.
+- Send a concise completion message after the vault write.
+- Never require a second save/no-save decision from the user.
 - Make retries safe and prevent accidental overwrites.
 - Keep the process local with Telegram polling and Obsidian Local REST API.
 
@@ -27,7 +27,7 @@ Build a single-user, local Telegram bot that turns PDF and voice messages into s
 
 ## Anti-goals
 
-- Never save an attachment or note before confirmation.
+- Never write an unauthorized or invalid attachment.
 - Never overwrite an existing vault file.
 - Never expose bot, provider, or Obsidian credentials in logs or Telegram replies.
 - Never send a full PDF or audio file to the LLM analysis endpoint.
@@ -41,9 +41,9 @@ The repository contains an earlier text/URL design and plan, but no implementati
 
 ### Chosen: local polling bot with staged attachment and enrichment
 
-The bot downloads each Telegram file to a private temporary directory, validates it, extracts PDF text or transcribes audio, asks an LLM for structured metadata, and stores a pending capture in SQLite. A Telegram preview asks for confirmation. On confirmation, the attachment and Markdown note are written using create-only operations.
+The bot downloads each Telegram file to a private temporary directory, validates it, extracts PDF text or transcribes audio, asks an LLM for structured metadata, stores a pending capture in SQLite, and immediately writes the attachment and Markdown note using create-only operations. A short Telegram confirmation follows a successful write.
 
-This preserves originals while making notes searchable. Staging keeps the explicit-confirmation rule intact.
+This preserves originals while making notes searchable. Staging keeps failed writes retryable without losing files.
 
 ### Rejected: attachment-only capture
 
@@ -68,13 +68,11 @@ PDF text extraction OR voice transcription
         ↓
 structured LLM analysis
         ↓
-Markdown preview + attachment metadata
-        ↓
 SQLite pending capture
         ↓
-Kaydet / İptal
-        ↓
 create-only attachment write + create-only note write
+        ↓
+Telegram completion message
         ↓
 success path or retryable failure
 ```
@@ -103,23 +101,22 @@ The note embeds its attachment with an Obsidian wikilink. It contains frontmatte
 - `markdown.py`: safe frontmatter, attachment embed, and note path generation.
 - `storage.py`: SQLite pending captures, expiry, and idempotent state transitions.
 - `obsidian.py`: create-only attachment and Markdown writes through Local REST API.
-- `bot.py`: commands, message routing, previews, and confirmation callbacks.
+- `bot.py`: commands, message routing, automatic saves, and cleanup.
 - `main.py`: dependency wiring and polling startup.
 
 ## Data and state
 
-Pending rows store the opaque capture ID, authorized chat ID, staged file path, source metadata, extracted/transcribed text, rendered note content, target vault paths, status, timestamps, and content hashes. Staged files remain outside the vault until confirmation.
+Pending rows store the opaque capture ID, authorized chat ID, staged file path, source metadata, extracted/transcribed text, rendered note content, target vault paths, status, timestamps, and content hashes. Staged files remain outside the vault until the automatic write starts.
 
 Allowed states:
 
 ```text
 pending → saved
-pending → cancelled
 pending → expired
 pending → pending  (retry after a failed vault write)
 ```
 
-The save transition is conditional on `status = 'pending'`. Repeated callbacks cannot create a second capture. If an attachment write succeeds and note writing fails, the attachment hash is checked on retry and the same file is reused; different content at the same path is a conflict.
+The save transition is conditional on `status = 'pending'` and protected by one process-local save lock. If an attachment write succeeds and note writing fails, the attachment hash is checked on retry and the same file is reused; different content at the same path is a conflict.
 
 ## Invariants
 
@@ -130,16 +127,15 @@ The save transition is conditional on `status = 'pending'`. Repeated callbacks c
 5. PDF extraction has page and text limits. Scanned PDFs return a clear “no extractable text” error.
 6. Voice transcription receives only the staged audio file and bounded metadata.
 7. Extracted text and transcription are untrusted data, not instructions.
-8. No vault write happens before `Kaydet`.
+8. Authorized, validated captures write immediately; failed writes retain the pending capture and staged file.
 9. Vault paths are generated internally and cannot contain traversal segments.
 10. Attachment and note writes are create-only. Existing different content is never overwritten.
 11. Pending captures expire after 15 minutes and their staged files are cleaned up.
-12. Callback data contains only an opaque pending capture ID.
-13. Logs contain event IDs and error classes, not message content or credentials.
+12. Logs contain event IDs and error classes, not message content or credentials.
 
 ## External interfaces
 
-- Telegram Bot API: polling, file download, preview messages, inline callbacks.
+- Telegram Bot API: polling, file download, and completion messages.
 - Obsidian Local REST API: create-only binary attachment and Markdown writes.
 - Transcription API: multipart audio upload, configured model, bounded response.
 - LLM API: structured JSON analysis from extracted/transcribed text only.
@@ -177,7 +173,7 @@ The transcription provider receives voice content. README must state this privac
 
 - Unit tests for config, authorization, file validation, filename/path safety, PDF extraction limits, and SQLite transitions.
 - Contract tests for Telegram download handling, transcription requests, LLM JSON validation, and Obsidian create-only writes.
-- Bot flow tests for unauthorized users, PDF preview, voice preview, confirmation, cancellation, expiry, repeated confirmation, and retry after partial vault failure.
+- Bot flow tests for unauthorized users, direct PDF/voice saves, provider fallbacks, and retry after partial vault failure.
 - Local smoke test with one PDF and one voice message using the user’s Telegram bot and running Obsidian Local REST API.
 
 ## Builder decisions left
@@ -190,10 +186,9 @@ The transcription provider receives voice content. README must state this privac
 ## Resolved implementation decisions
 
 - The LLM returns exactly `title`, `summary`, `tags`, and `body`. Title is 1–120 characters, summary is 1–1200 characters, body is at most 12000 characters, and tags contain at most 10 normalized lowercase kebab-case values.
-- The preview sends title, summary, attachment name, and the first 2500 characters of the body. It states when the saved note contains more content. This stays below Telegram message limits.
+- Telegram sends only a short success or failure message. Full note content stays in Obsidian.
 - Obsidian writes use `PUT /vault/<vault-relative-path>` with Bearer authentication, `If-None-Match: *`, and the correct content type. `409` and `412` are duplicate-path conflicts; other failures remain retryable.
 - Transcription uses `POST <TRANSCRIPTION_BASE_URL>/audio/transcriptions` with multipart `file` and `model` fields. A successful response must contain a string `text` field. The optional language setting is omitted in the first version.
-- Only inline `Kaydet` and `İptal` buttons complete a pending capture. Callback chat ID must match the configured chat ID. No command-based confirmation is added.
 - Names use Unicode normalization, safe-character filtering, bounded length, and a capture-ID prefix. Empty names fall back to `capture`. The generated ID prevents collisions.
-- Empty or nearly empty extraction, transcription failure, or LLM failure does not discard the original file. The bot creates a deterministic fallback note, preserves available text, and still requires confirmation.
+- Empty or nearly empty extraction, transcription failure, or LLM failure does not discard the original file. The bot creates a deterministic fallback note and preserves available text.
 - Staged files are removed after cancellation, expiry, or successful vault completion. Pending rows stay for 30 days for audit and are then purged. Failed writes keep the pending row retryable until its 15-minute expiry.

@@ -8,8 +8,8 @@ Local Telegram bot for turning PDF documents and voice messages into searchable 
 2. Saves the Telegram file to a private staging directory.
 3. Extracts PDF text or transcribes voice through the configured transcription API.
 4. Tries to generate a title, summary, tags, and body through an OpenAI-compatible LLM endpoint.
-5. Sends a Telegram preview.
-6. Writes the original attachment and Markdown note to Obsidian only after `Kaydet`.
+5. Writes the original attachment and Markdown note to Obsidian immediately.
+6. Sends a short Telegram confirmation after the write completes.
 
 Scanned PDFs without an extractable text layer are preserved with a fallback note. Provider failures also preserve the original capture with deterministic metadata. OCR is not included.
 
@@ -63,13 +63,13 @@ pytest -q
 python -m compileall src
 ```
 
-For a live smoke test, send one text-based PDF and one short voice message. Confirm each Telegram preview with `Kaydet`, then verify both the original files and Markdown notes in Obsidian. Send the same callback twice during a test; only one note should exist.
+For a live smoke test, send one text-based PDF and one short voice message from Telegram mobile. The bot saves each automatically, then verify both original files and Markdown notes in Obsidian.
 
 ## Limits and safety
 
 - Only one configured Telegram chat is authorized.
 - PDF and audio size, PDF page, extracted text, and network time limits are configurable.
-- Files stage outside the vault until confirmation.
+- Files stage outside the vault until validation completes and the automatic write starts.
 - Existing vault files are never overwritten.
-- Failed Obsidian writes remain retryable until the preview expires after 15 minutes.
+- Failed Obsidian writes keep the staged file and pending record for retry until the 15-minute cleanup deadline.
 - Secrets are read from environment variables and are not logged.

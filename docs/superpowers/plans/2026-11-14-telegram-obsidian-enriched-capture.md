@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a local single-user Telegram bot that saves PDFs and voice messages as searchable, confirmed Obsidian notes with original attachments.
+**Goal:** Build a local single-user Telegram bot that saves PDFs and voice messages as searchable Obsidian notes with original attachments, without a second save decision.
 
-**Architecture:** A polling Telegram adapter authorizes one chat, stages files outside the vault, extracts PDF text or calls a transcription endpoint, and asks an LLM for bounded structured metadata. SQLite stores pending captures until inline confirmation; Obsidian writes attachment and note files with create-only semantics.
+**Architecture:** A polling Telegram adapter authorizes one chat, stages files outside the vault, extracts PDF text or calls a transcription endpoint, and asks an LLM for bounded structured metadata. SQLite stores pending captures during automatic create-only Obsidian writes.
 
 **Tech Stack:** Python 3.11+, `python-telegram-bot`, `httpx`, `pypdf`, `python-dotenv`, SQLite, pytest.
 
@@ -13,13 +13,12 @@
 ## Global Constraints
 
 - Process only `TELEGRAM_ALLOWED_CHAT_ID`.
-- Do not write to the vault before `Kaydet`.
+- Write authorized, validated captures automatically after processing.
 - Use bounded PDF/audio downloads, PDF pages, extracted text, and finite network timeouts.
-- Keep staged files outside the vault until confirmation.
+- Keep staged files outside the vault until validation completes and writing starts.
 - Use `PUT /vault/<vault-relative-path>` with Bearer authentication and `If-None-Match: *`.
 - Never overwrite existing files; treat `409` and `412` as conflicts.
-- Use opaque capture IDs in callback data.
-- Remove staged files after cancel, expiry, or successful completion.
+- Remove staged files after expiry or successful completion.
 - Do not log content, bot tokens, provider keys, or Obsidian keys.
 - Preserve pending state after a failed vault write until the 15-minute expiry.
 
@@ -28,8 +27,7 @@
 - A Telegram file with a misleading filename or MIME type must be rejected unless its content signature is allowed; test in Task 2.
 - A PDF with many pages or excessive extracted text must stop at configured limits; test in Task 3.
 - A transcription or LLM response with malformed JSON or unexpected fields must not create a pending note; test in Tasks 3 and 4.
-- A preview longer than Telegram limits must be truncated without changing the saved note; test in Task 6.
-- A repeated confirmation or partial attachment write must not overwrite or duplicate a vault file; test in Tasks 5 and 6.
+- A partial attachment write must not overwrite or duplicate a vault file; test in Tasks 5 and 6.
 
 ### Task 1: Project foundation, configuration, and capture store
 
@@ -127,7 +125,7 @@
 - [ ] Run the focused tests; expect PASS.
 - [ ] Commit `feat: add create-only obsidian writer`.
 
-### Task 6: Telegram preview and confirmation flow
+### Task 6: Telegram automatic save flow
 
 **Files:**
 - Create: `src/telegram_obsidian_agent/bot.py`
@@ -136,9 +134,9 @@
 **Interfaces:**
 - `build_application(settings: Settings, store: PendingStore, stager: TelegramFileStager, extractor: PdfTextExtractor, transcriber: TranscriptionClient, analyzer: LLMAnalyzer, obsidian: ObsidianClient) -> Application`
 
-- [ ] Test unauthorized messages, PDF routing, voice routing, preview keyboard, preview truncation, `İptal`, expiry, unknown IDs, exactly-once confirmation, and retry after a partial Obsidian write.
+- [ ] Test unauthorized messages, direct PDF/voice saves, provider fallbacks, and retry after a partial Obsidian write.
 - [ ] Run the focused tests; expect failure before implementation.
-- [ ] Implement thin Telegram handlers. Authorize before processing, stage and enrich before creating a pending row, keep callback data opaque, and make save conditional on the store state.
+- [ ] Implement thin Telegram handlers. Authorize before processing, stage and enrich before creating a pending row, then save automatically under a lock.
 - [ ] Run the focused tests; expect PASS.
 - [ ] Commit `feat: add telegram enrichment flow`.
 
@@ -164,4 +162,4 @@
 
 ## Self-review
 
-All spec goals map to Tasks 2–7. Explicit-confirmation, no-overwrite, bounded processing, retry state, cleanup, and secret handling have dedicated interfaces or tests. OCR, cloud deployment, multi-user support, and arbitrary files remain outside the plan.
+All spec goals map to Tasks 2–7. Automatic saving, no-overwrite, bounded processing, retry state, cleanup, and secret handling have dedicated interfaces or tests. OCR, cloud deployment, multi-user support, and arbitrary files remain outside the plan.
