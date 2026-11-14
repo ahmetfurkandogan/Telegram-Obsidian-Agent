@@ -28,6 +28,12 @@ class FakeBot:
         return FakeDownloadedFile(self.payload)
 
 
+class StreamingBot(FakeBot):
+    async def get_file(self, file_id: str):
+        self.request_count += 1
+        return type("StreamingDownloadedFile", (), {"file_path": "https://api.telegram.org/file/bottoken/documents/stream.pdf"})()
+
+
 class FakeDocument:
     file_id = "file-1"
     file_name = "report.pdf"
@@ -48,6 +54,10 @@ class StreamingFile:
     file_name = "stream.pdf"
     mime_type = "application/pdf"
     file_size = None
+
+
+class AbsoluteStreamingFile(StreamingFile):
+    file_path = "https://api.telegram.org/file/bottoken/documents/stream.pdf"
 
 
 def test_downloads_and_hashes_pdf_into_staging(tmp_path: Path) -> None:
@@ -104,6 +114,26 @@ def test_streaming_download_aborts_when_remote_response_exceeds_limit(tmp_path: 
         asyncio.run(stager.download(StreamingFile(), tmp_path))
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_streaming_download_accepts_telegram_absolute_file_url(tmp_path: Path) -> None:
+    seen_urls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen_urls.append(str(request.url))
+        return httpx.Response(200, content=b"%PDF-1.7\nhello")
+
+    stager = TelegramFileStager(
+        StreamingBot(b"unused"),
+        max_pdf_bytes=100,
+        max_audio_bytes=100,
+        transport=httpx.MockTransport(handler),
+    )
+
+    staged = asyncio.run(stager.download(AbsoluteStreamingFile(), tmp_path))
+
+    assert staged.path.read_bytes() == b"%PDF-1.7\nhello"
+    assert seen_urls == ["https://api.telegram.org/file/bottoken/documents/stream.pdf"]
 
 
 def test_canonicalizes_media_metadata_after_signature_validation(tmp_path: Path) -> None:

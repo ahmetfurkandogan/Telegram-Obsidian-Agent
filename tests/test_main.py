@@ -28,7 +28,9 @@ def test_load_settings_reads_environment(monkeypatch) -> None:
     assert settings.telegram_allowed_chat_id == 123
 
 
-def test_load_settings_rejects_missing_environment(monkeypatch) -> None:
+def test_load_settings_rejects_missing_environment(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("telegram_obsidian_agent.main.load_dotenv", lambda: None)
     for key in environment():
         monkeypatch.delenv(key, raising=False)
 

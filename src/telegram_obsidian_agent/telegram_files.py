@@ -2,7 +2,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -39,7 +39,14 @@ class TelegramFileStager:
         try:
             telegram_file = await self.bot.get_file(document_or_voice.file_id)
             if getattr(telegram_file, "file_path", None):
-                url = f"https://api.telegram.org/file/bot{self.bot.token}/{quote(telegram_file.file_path, safe='/')}"
+                file_path = str(telegram_file.file_path)
+                if file_path.startswith(("http://", "https://")):
+                    parsed = urlparse(file_path)
+                    if parsed.scheme != "https" or parsed.hostname != "api.telegram.org":
+                        raise ValueError("unexpected Telegram file URL")
+                    url = file_path
+                else:
+                    url = f"https://api.telegram.org/file/bot{self.bot.token}/{quote(file_path, safe='/')}"
                 async with httpx.AsyncClient(transport=self.transport, timeout=60.0) as client:
                     async with client.stream("GET", url) as response:
                         response.raise_for_status()

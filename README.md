@@ -7,11 +7,11 @@ Local Telegram bot for turning PDF documents and voice messages into searchable 
 1. Accepts a PDF or Telegram voice message from one configured chat.
 2. Saves the Telegram file to a private staging directory.
 3. Extracts PDF text or transcribes voice through the configured transcription API.
-4. Generates a title, summary, tags, and body through an OpenAI-compatible LLM endpoint.
+4. Tries to generate a title, summary, tags, and body through an OpenAI-compatible LLM endpoint.
 5. Sends a Telegram preview.
 6. Writes the original attachment and Markdown note to Obsidian only after `Kaydet`.
 
-Scanned PDFs without an extractable text layer are preserved with a fallback note. OCR is not included.
+Scanned PDFs without an extractable text layer are preserved with a fallback note. Provider failures also preserve the original capture with deterministic metadata. OCR is not included.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ Scanned PDFs without an extractable text layer are preserved with a fallback not
 ## Setup
 
 ```bash
-cd "/Users/a.furkan/Documents/Telegram Obsidian Agent"
+cd "/Users/a.furkan/Desktop/ Telegram-Obsidian Agent"
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[test]'

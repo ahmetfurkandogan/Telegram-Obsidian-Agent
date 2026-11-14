@@ -195,5 +195,5 @@ The transcription provider receives voice content. README must state this privac
 - Transcription uses `POST <TRANSCRIPTION_BASE_URL>/audio/transcriptions` with multipart `file` and `model` fields. A successful response must contain a string `text` field. The optional language setting is omitted in the first version.
 - Only inline `Kaydet` and `İptal` buttons complete a pending capture. Callback chat ID must match the configured chat ID. No command-based confirmation is added.
 - Names use Unicode normalization, safe-character filtering, bounded length, and a capture-ID prefix. Empty names fall back to `capture`. The generated ID prevents collisions.
-- Empty or nearly empty extraction does not discard the original file. The bot creates a deterministic fallback note, marks the text as unavailable, and still requires confirmation.
+- Empty or nearly empty extraction, transcription failure, or LLM failure does not discard the original file. The bot creates a deterministic fallback note, preserves available text, and still requires confirmation.
 - Staged files are removed after cancellation, expiry, or successful vault completion. Pending rows stay for 30 days for audit and are then purged. Failed writes keep the pending row retryable until its 15-minute expiry.

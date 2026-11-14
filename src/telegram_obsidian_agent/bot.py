@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,9 @@ from .models import Analysis, Capture
 from .security import assert_allowed_chat
 from .storage import PendingStore
 from .telegram_files import TelegramFileStager
+
+
+logger = logging.getLogger(__name__)
 
 
 class BotService:
@@ -46,7 +50,7 @@ class BotService:
             await asyncio.sleep(max(1, min(60, self.settings.pending_ttl_seconds // 2)))
             self.cleanup_expired()
 
-    async def handle_message(self, update) -> None:
+    async def handle_message(self, update, context=None) -> None:
         chat_id = update.effective_chat.id
         try:
             assert_allowed_chat(chat_id, self.settings.telegram_allowed_chat_id)
@@ -62,7 +66,10 @@ class BotService:
             if source_type == "pdf":
                 extracted_text = self.extractor.extract(staged.path).text
             else:
-                extracted_text = self.transcriber.transcribe(staged.path, staged.mime_type)
+                try:
+                    extracted_text = self.transcriber.transcribe(staged.path, staged.mime_type)
+                except Exception:
+                    extracted_text = ""
             analysis = self._analyze(extracted_text, source_type, staged.original_name)
             now = datetime.now(timezone.utc)
             capture_id = uuid.uuid4().hex[:12]
@@ -94,7 +101,12 @@ class BotService:
                 ]]
             )
             await message.reply_text(build_preview(analysis, capture, 3500), reply_markup=keyboard)
-        except Exception:
+        except Exception as exc:
+            logger.error(
+                "message processing failed: %s: %s",
+                type(exc).__name__,
+                str(exc).replace(self.settings.telegram_bot_token, "<redacted>"),
+            )
             capture = locals().get("capture")
             if capture is not None:
                 self.store.mark_cancelled(capture.id)
@@ -107,14 +119,22 @@ class BotService:
                 pass
 
     def _analyze(self, extracted_text: str, source_type: str, original_name: str) -> Analysis:
-        if extracted_text.strip():
+        if not extracted_text.strip():
+            return Analysis(
+                title=Path(original_name).stem or "Telegram capture",
+                summary="No extractable text was available.",
+                tags=["telegram-inbox"],
+                body=f"Original attachment: {original_name}\n\nText extraction or transcription returned no content.",
+            )
+        try:
             return self.analyzer.analyze(extracted_text, source_type, original_name)
-        return Analysis(
-            title=Path(original_name).stem or "Telegram capture",
-            summary="No extractable text was available.",
-            tags=["telegram-inbox"],
-            body=f"Original attachment: {original_name}\n\nText extraction or transcription returned no content.",
-        )
+        except Exception:
+            return Analysis(
+                title=Path(original_name).stem or "Telegram capture",
+                summary="AI analysis unavailable; extracted content preserved.",
+                tags=["telegram-inbox"],
+                body=extracted_text,
+            )
 
     async def handle_callback(self, update) -> None:
         chat_id = update.effective_chat.id

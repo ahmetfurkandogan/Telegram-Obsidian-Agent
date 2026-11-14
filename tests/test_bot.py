@@ -106,6 +106,16 @@ class FakeAnalyzer:
         return Analysis("Generated title", "Generated summary", ["telegram"], self.body)
 
 
+class FailingAnalyzer:
+    def analyze(self, text: str, source_type: str, original_name: str) -> Analysis:
+        raise RuntimeError("provider quota exhausted")
+
+
+class FailingTranscriber:
+    def transcribe(self, path: Path, mime_type: str) -> str:
+        raise RuntimeError("provider unavailable")
+
+
 class FakeObsidian:
     def __init__(self):
         self.attachment_calls = 0
@@ -150,6 +160,15 @@ def test_pdf_message_creates_preview_with_save_and_cancel_buttons(tmp_path: Path
     assert "İptal" in str(keyboard)
 
 
+def test_message_handler_accepts_telegram_context_argument(tmp_path: Path) -> None:
+    service, _ = make_service(tmp_path)
+    message = FakeMessage(document=object())
+
+    asyncio.run(service.handle_message(FakeUpdate(123, message), object()))
+
+    assert len(message.replies) == 1
+
+
 def test_voice_message_routes_to_transcription(tmp_path: Path) -> None:
     service, _ = make_service(tmp_path, source_type="voice")
     message = FakeMessage(voice=object())
@@ -157,6 +176,26 @@ def test_voice_message_routes_to_transcription(tmp_path: Path) -> None:
     asyncio.run(service.handle_message(FakeUpdate(123, message)))
 
     assert "Generated summary" in message.replies[0][0]
+
+
+def test_analyzer_failure_keeps_extracted_content_captureable(tmp_path: Path) -> None:
+    service, _ = make_service(tmp_path)
+    service.analyzer = FailingAnalyzer()
+    message = FakeMessage(document=object())
+
+    asyncio.run(service.handle_message(FakeUpdate(123, message)))
+
+    assert "AI analysis unavailable" in message.replies[0][0]
+
+
+def test_transcriber_failure_keeps_voice_captureable(tmp_path: Path) -> None:
+    service, _ = make_service(tmp_path, source_type="voice")
+    service.transcriber = FailingTranscriber()
+    message = FakeMessage(voice=object())
+
+    asyncio.run(service.handle_message(FakeUpdate(123, message)))
+
+    assert "No extractable text" in message.replies[0][0]
 
 
 def test_unauthorized_chat_is_ignored(tmp_path: Path) -> None:
