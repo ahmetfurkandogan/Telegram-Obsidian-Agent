@@ -22,6 +22,13 @@ def _integer(environ: Mapping[str, str], name: str, default: int | None = None) 
         raise ValueError(f"{name} must be an integer") from exc
 
 
+def _positive_integer(environ: Mapping[str, str], name: str, default: int) -> int:
+    value = _integer(environ, name, default)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
@@ -59,9 +66,9 @@ class Settings:
             llm_model=environ.get("LLM_MODEL", "gpt-4o-mini"),
             database_path=Path(environ.get("DATABASE_PATH", "data/agent.sqlite3")),
             staging_dir=Path(environ.get("STAGING_DIR", "data/staging")),
-            max_pdf_bytes=_integer(environ, "MAX_PDF_BYTES", 20_000_000),
-            max_audio_bytes=_integer(environ, "MAX_AUDIO_BYTES", 10_000_000),
-            max_pdf_pages=_integer(environ, "MAX_PDF_PAGES", 100),
-            max_extracted_chars=_integer(environ, "MAX_EXTRACTED_CHARS", 120_000),
-            pending_ttl_seconds=_integer(environ, "PENDING_TTL_SECONDS", 900),
+            max_pdf_bytes=_positive_integer(environ, "MAX_PDF_BYTES", 20_000_000),
+            max_audio_bytes=_positive_integer(environ, "MAX_AUDIO_BYTES", 10_000_000),
+            max_pdf_pages=_positive_integer(environ, "MAX_PDF_PAGES", 100),
+            max_extracted_chars=_positive_integer(environ, "MAX_EXTRACTED_CHARS", 120_000),
+            pending_ttl_seconds=_positive_integer(environ, "PENDING_TTL_SECONDS", 900),
         )

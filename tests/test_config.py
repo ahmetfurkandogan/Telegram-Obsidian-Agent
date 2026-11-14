@@ -57,3 +57,15 @@ def test_settings_reject_invalid_chat_id() -> None:
         assert "TELEGRAM_ALLOWED_CHAT_ID" in str(exc)
     else:
         raise AssertionError("invalid chat ID must fail")
+
+
+def test_settings_reject_non_positive_limits() -> None:
+    environment = valid_environment()
+    environment["MAX_PDF_BYTES"] = "0"
+
+    try:
+        Settings.from_env(environment)
+    except ValueError as exc:
+        assert "MAX_PDF_BYTES" in str(exc)
+    else:
+        raise AssertionError("non-positive limits must fail")
