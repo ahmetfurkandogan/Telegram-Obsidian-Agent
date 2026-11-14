@@ -54,3 +54,19 @@ def preview_text(rendered: RenderedNote, max_chars: int = 3500) -> str:
     if max_chars <= len(marker):
         return marker[-max_chars:]
     return rendered.content[: max_chars - len(marker)] + marker
+
+
+def build_preview(analysis: Analysis, capture: Capture, max_chars: int = 3500) -> str:
+    header = (
+        f"Title: {analysis.title}\n"
+        f"Attachment: {capture.original_name}\n\n"
+        f"Summary:\n{analysis.summary}\n\n"
+        "Content:\n"
+    )
+    marker = "\n\n[preview truncated]"
+    available = max_chars - len(header)
+    if available <= len(marker):
+        return (header[:max_chars - len(marker)] + marker)[:max_chars]
+    if len(analysis.body) <= available:
+        return header + analysis.body
+    return header + analysis.body[: available - len(marker)] + marker

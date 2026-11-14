@@ -9,7 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from .config import Settings
-from .markdown import build_vault_paths, preview_text, render_note
+from .markdown import build_preview, build_vault_paths, render_note
 from .models import Analysis, Capture
 from .security import assert_allowed_chat
 from .storage import PendingStore
@@ -93,7 +93,7 @@ class BotService:
                     InlineKeyboardButton("İptal", callback_data=f"cancel:{capture_id}"),
                 ]]
             )
-            await message.reply_text(preview_text(rendered, 3500), reply_markup=keyboard)
+            await message.reply_text(build_preview(analysis, capture, 3500), reply_markup=keyboard)
         except Exception:
             capture = locals().get("capture")
             if capture is not None:

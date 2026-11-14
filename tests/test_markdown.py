@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from telegram_obsidian_agent.markdown import build_vault_paths, preview_text, render_note
+from telegram_obsidian_agent.markdown import build_preview, build_vault_paths, preview_text, render_note
 from telegram_obsidian_agent.models import Analysis, Capture, RenderedNote
 
 
@@ -61,3 +61,24 @@ def test_preview_text_truncates_without_changing_saved_note() -> None:
 
     assert len(preview) <= 30
     assert "truncated" in preview.lower()
+
+
+def test_build_preview_shows_metadata_and_body_without_frontmatter() -> None:
+    analysis = Analysis("Title", "Short summary", ["tag"], "Body content")
+
+    preview = build_preview(analysis, make_capture())
+
+    assert "Title" in preview
+    assert "report.pdf" in preview
+    assert "Short summary" in preview
+    assert "Body content" in preview
+    assert "captured_at:" not in preview
+
+
+def test_build_preview_limits_body_to_telegram_size() -> None:
+    analysis = Analysis("Title", "Summary", [], "x" * 5000)
+
+    preview = build_preview(analysis, make_capture(), max_chars=100)
+
+    assert len(preview) <= 100
+    assert "preview truncated" in preview
