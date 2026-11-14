@@ -27,11 +27,13 @@ class PdfTextExtractor:
 
     def extract(self, path: Path) -> ExtractedText:
         reader = self.reader_factory(path)
-        pages = list(reader.pages)
-        truncated = len(pages) > self.max_pages
         chunks: list[str] = []
         total = 0
-        for page in pages[: self.max_pages]:
+        truncated = False
+        for index, page in enumerate(reader.pages):
+            if index >= self.max_pages:
+                truncated = True
+                break
             page_text = page.extract_text() or ""
             if not page_text:
                 continue

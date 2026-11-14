@@ -30,6 +30,26 @@ def test_pdf_extractor_limits_pages_and_characters(tmp_path: Path) -> None:
     assert result.truncated is True
 
 
+def test_pdf_extractor_does_not_materialize_pages_after_limit(tmp_path: Path) -> None:
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF")
+    accessed = []
+
+    class GuardedPages:
+        def __iter__(self):
+            for index in range(4):
+                accessed.append(index)
+                yield FakePage(f"page {index}")
+
+    class GuardedReader:
+        pages = GuardedPages()
+
+    result = PdfTextExtractor(max_pages=1, max_chars=100, reader_factory=lambda _: GuardedReader()).extract(source)
+
+    assert result.truncated is True
+    assert accessed == [0, 1]
+
+
 def test_pdf_extractor_reports_empty_text(tmp_path: Path) -> None:
     source = tmp_path / "scan.pdf"
     source.write_bytes(b"%PDF")

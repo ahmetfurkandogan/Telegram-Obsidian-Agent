@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -21,11 +22,9 @@ def create_application(settings: Settings):
     settings.staging_dir.mkdir(parents=True, exist_ok=True)
     store = PendingStore(settings.database_path)
     now = datetime.now(timezone.utc)
-    store.expire(now)
+    for staged_path in store.expire_and_get_staged_paths(now):
+        Path(staged_path).unlink(missing_ok=True)
     store.purge(now - timedelta(days=30))
-    for path in settings.staging_dir.iterdir():
-        if path.is_file() and path.stat().st_mtime < (now - timedelta(seconds=settings.pending_ttl_seconds)).timestamp():
-            path.unlink(missing_ok=True)
     extractor = PdfTextExtractor(max_pages=settings.max_pdf_pages, max_chars=settings.max_extracted_chars)
     transcriber = TranscriptionClient(
         base_url=settings.transcription_base_url,

@@ -26,6 +26,25 @@ class BotService:
         self.analyzer = analyzer
         self.obsidian = obsidian
         self._save_lock = asyncio.Lock()
+        self._cleanup_task = None
+
+    def cleanup_expired(self) -> None:
+        for staged_path in self.store.expire_and_get_staged_paths(datetime.now(timezone.utc)):
+            Path(staged_path).unlink(missing_ok=True)
+
+    def start_cleanup_task(self) -> None:
+        if self._cleanup_task is None:
+            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+
+    async def stop_cleanup_task(self) -> None:
+        if self._cleanup_task is not None:
+            self._cleanup_task.cancel()
+            self._cleanup_task = None
+
+    async def _cleanup_loop(self) -> None:
+        while True:
+            await asyncio.sleep(max(1, min(60, self.settings.pending_ttl_seconds // 2)))
+            self.cleanup_expired()
 
     async def handle_message(self, update) -> None:
         chat_id = update.effective_chat.id
@@ -76,10 +95,16 @@ class BotService:
             )
             await message.reply_text(preview_text(rendered, 3500), reply_markup=keyboard)
         except Exception:
+            capture = locals().get("capture")
+            if capture is not None:
+                self.store.mark_cancelled(capture.id)
             staged_path = locals().get("staged")
             if staged_path is not None:
                 staged_path.path.unlink(missing_ok=True)
-            await message.reply_text("İşlenemedi. Dosya türü, boyutu veya sağlayıcı bağlantısını kontrol edin.")
+            try:
+                await message.reply_text("İşlenemedi. Dosya türü, boyutu veya sağlayıcı bağlantısını kontrol edin.")
+            except Exception:
+                pass
 
     def _analyze(self, extracted_text: str, source_type: str, original_name: str) -> Analysis:
         if extracted_text.strip():
@@ -166,6 +191,15 @@ def build_application(settings: Settings, store: PendingStore, stager, extractor
         analyzer=analyzer,
         obsidian=obsidian,
     )
+
+    async def post_init(_application) -> None:
+        service.start_cleanup_task()
+
+    async def post_stop(_application) -> None:
+        await service.stop_cleanup_task()
+
+    application.post_init = post_init
+    application.post_stop = post_stop
 
     async def start(update, context) -> None:
         try:

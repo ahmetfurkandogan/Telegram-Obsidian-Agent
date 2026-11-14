@@ -58,3 +58,13 @@ def test_pending_store_purges_old_terminal_rows(tmp_path) -> None:
 
     assert store.purge(now - timedelta(days=30)) == 1
     assert store.get(item.id) is None
+
+
+def test_pending_store_expires_and_returns_staged_paths(tmp_path) -> None:
+    store = PendingStore(tmp_path / "agent.sqlite3")
+    now = datetime.now(timezone.utc)
+    item = capture("expire-with-file", expires_at=now - timedelta(seconds=1))
+    store.create(item)
+
+    assert store.expire_and_get_staged_paths(now) == ["/tmp/source.pdf"]
+    assert store.get(item.id).status == "expired"

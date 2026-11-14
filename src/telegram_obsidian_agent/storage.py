@@ -122,6 +122,20 @@ class PendingStore:
             )
         return result.rowcount
 
+    def expire_and_get_staged_paths(self, now: datetime) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, staged_path FROM captures WHERE status = 'pending' AND expires_at <= ?",
+                (_timestamp(now),),
+            ).fetchall()
+            if not rows:
+                return []
+            connection.executemany(
+                "UPDATE captures SET status = 'expired' WHERE id = ? AND status = 'pending'",
+                [(row["id"],) for row in rows],
+            )
+        return [row["staged_path"] for row in rows]
+
     def purge(self, before: datetime) -> int:
         with self._connect() as connection:
             result = connection.execute(

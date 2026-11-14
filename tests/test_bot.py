@@ -44,6 +44,11 @@ class FakeMessage:
         self.replies.append((text, reply_markup))
 
 
+class FailingReplyMessage(FakeMessage):
+    async def reply_text(self, text, reply_markup=None):
+        raise RuntimeError("telegram unavailable")
+
+
 class FakeChat:
     def __init__(self, chat_id: int):
         self.id = chat_id
@@ -223,3 +228,27 @@ def test_failed_note_write_keeps_capture_retryable(tmp_path: Path) -> None:
 
     assert obsidian.attachment_calls == 2
     assert obsidian.note_calls == 2
+
+
+def test_cleanup_expired_removes_only_expired_staged_files(tmp_path: Path) -> None:
+    service, _ = make_service(tmp_path, ttl=0)
+    message = FakeMessage(document=object())
+    asyncio.run(service.handle_message(FakeUpdate(123, message)))
+    capture_id = message.replies[0][1].inline_keyboard[0][0].callback_data.split(":", 1)[1]
+    staged_path = Path(service.store.get(capture_id).staged_path)
+    assert staged_path.exists()
+
+    service.cleanup_expired()
+
+    assert not staged_path.exists()
+
+
+def test_failed_preview_delivery_cancels_pending_capture(tmp_path: Path) -> None:
+    service, _ = make_service(tmp_path)
+    cancelled = []
+    original_mark_cancelled = service.store.mark_cancelled
+    service.store.mark_cancelled = lambda capture_id: cancelled.append(capture_id) or original_mark_cancelled(capture_id)
+
+    asyncio.run(service.handle_message(FakeUpdate(123, FailingReplyMessage(document=object()))))
+
+    assert len(cancelled) == 1

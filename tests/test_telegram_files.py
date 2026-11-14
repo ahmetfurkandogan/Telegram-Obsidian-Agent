@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 from pathlib import Path
 
+import httpx
 import pytest
 
 from telegram_obsidian_agent.models import SourceType
@@ -19,6 +21,7 @@ class FakeBot:
     def __init__(self, payload: bytes):
         self.payload = payload
         self.request_count = 0
+        self.token = "token"
 
     async def get_file(self, file_id: str) -> FakeDownloadedFile:
         self.request_count += 1
@@ -37,6 +40,14 @@ class FakeVoice:
     file_unique_id = "voice-unique"
     mime_type = "audio/ogg"
     file_size = 24
+
+
+class StreamingFile:
+    file_id = "stream-1"
+    file_path = "documents/stream.pdf"
+    file_name = "stream.pdf"
+    mime_type = "application/pdf"
+    file_size = None
 
 
 def test_downloads_and_hashes_pdf_into_staging(tmp_path: Path) -> None:
@@ -82,3 +93,31 @@ def test_voice_without_filename_gets_safe_ogg_name(tmp_path: Path) -> None:
 
     assert staged.source_type is SourceType.VOICE
     assert staged.original_name == "voice-voice-unique.ogg"
+
+
+def test_streaming_download_aborts_when_remote_response_exceeds_limit(tmp_path: Path) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, content=b"%PDF-123456"))
+    bot = FakeBot(b"unused")
+    stager = TelegramFileStager(bot, max_pdf_bytes=5, max_audio_bytes=100, transport=transport)
+
+    with pytest.raises(ValueError, match="size"):
+        asyncio.run(stager.download(StreamingFile(), tmp_path))
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_canonicalizes_media_metadata_after_signature_validation(tmp_path: Path) -> None:
+    class MisleadingDocument:
+        file_id = "file-2"
+        file_name = "voice.ogg"
+        mime_type = "application/pdf"
+        file_size = 10
+
+    staged = asyncio.run(
+        TelegramFileStager(FakeBot(b"%PDF-1.7"), max_pdf_bytes=100, max_audio_bytes=100).download(
+            MisleadingDocument(), tmp_path
+        )
+    )
+
+    assert staged.original_name == "voice.pdf"
+    assert staged.mime_type == "application/pdf"
