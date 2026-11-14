@@ -69,3 +69,12 @@ def test_settings_reject_non_positive_limits() -> None:
         assert "MAX_PDF_BYTES" in str(exc)
     else:
         raise AssertionError("non-positive limits must fail")
+
+
+def test_settings_loads_obsidian_tls_verification_flag() -> None:
+    environment = valid_environment()
+    environment["OBSIDIAN_VERIFY_TLS"] = "false"
+
+    settings = Settings.from_env(environment)
+
+    assert settings.obsidian_verify_tls is False

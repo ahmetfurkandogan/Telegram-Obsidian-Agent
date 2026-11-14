@@ -44,6 +44,7 @@ LLM_API_KEY=...
 Find the numeric chat ID by sending `/start` to the bot and reading the update during development, or use a trusted Telegram chat-ID utility. Keep only your own ID in `TELEGRAM_ALLOWED_CHAT_ID`.
 
 Set the Obsidian Local REST API base URL and key. The default is `http://127.0.0.1:27123`.
+If only the plugin’s HTTPS listener is active, use `https://127.0.0.1:27124` and set `OBSIDIAN_VERIFY_TLS=false` for its local self-signed certificate.
 
 Voice audio and extracted document text are sent to the configured external providers. Use providers whose privacy policy fits the content.
 

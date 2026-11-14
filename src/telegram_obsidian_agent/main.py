@@ -32,7 +32,11 @@ def create_application(settings: Settings):
         model=settings.transcription_model,
     )
     analyzer = LLMAnalyzer(base_url=settings.llm_base_url, api_key=settings.llm_api_key, model=settings.llm_model)
-    obsidian = ObsidianClient(base_url=settings.obsidian_base_url, api_key=settings.obsidian_api_key)
+    obsidian = ObsidianClient(
+        base_url=settings.obsidian_base_url,
+        api_key=settings.obsidian_api_key,
+        verify=settings.obsidian_verify_tls,
+    )
     return build_application(settings, store, None, extractor, transcriber, analyzer, obsidian)
 
 

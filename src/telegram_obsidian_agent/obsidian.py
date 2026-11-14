@@ -8,11 +8,12 @@ from .models import RenderedNote
 
 
 class ObsidianClient:
-    def __init__(self, *, base_url: str, api_key: str, transport=None, timeout: float = 30.0) -> None:
+    def __init__(self, *, base_url: str, api_key: str, transport=None, timeout: float = 30.0, verify: bool = True) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.transport = transport
         self.timeout = timeout
+        self.verify = verify
 
     def write_attachment(self, note: RenderedNote, source_path: Path, mime_type: str, sha256: str) -> None:
         path = self._vault_url(note.attachment_path)
@@ -21,6 +22,7 @@ class ObsidianClient:
                 base_url=self.base_url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=self.timeout,
+                verify=self.verify,
                 transport=self.transport,
             ) as client:
                 response = client.put(
@@ -46,6 +48,7 @@ class ObsidianClient:
                 base_url=self.base_url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=self.timeout,
+                verify=self.verify,
                 transport=self.transport,
             ) as client:
                 response = client.put(
@@ -67,6 +70,7 @@ class ObsidianClient:
                 base_url=self.base_url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 timeout=self.timeout,
+                verify=self.verify,
                 transport=self.transport,
             ) as client:
                 client.get("/").raise_for_status()

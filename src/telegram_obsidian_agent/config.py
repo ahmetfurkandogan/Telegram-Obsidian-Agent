@@ -29,6 +29,18 @@ def _positive_integer(environ: Mapping[str, str], name: str, default: int) -> in
     return value
 
 
+def _boolean(environ: Mapping[str, str], name: str, default: bool) -> bool:
+    raw = environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
@@ -49,6 +61,7 @@ class Settings:
     max_pdf_pages: int
     max_extracted_chars: int
     pending_ttl_seconds: int
+    obsidian_verify_tls: bool = True
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "Settings":
@@ -71,4 +84,5 @@ class Settings:
             max_pdf_pages=_positive_integer(environ, "MAX_PDF_PAGES", 100),
             max_extracted_chars=_positive_integer(environ, "MAX_EXTRACTED_CHARS", 120_000),
             pending_ttl_seconds=_positive_integer(environ, "PENDING_TTL_SECONDS", 900),
+            obsidian_verify_tls=_boolean(environ, "OBSIDIAN_VERIFY_TLS", True),
         )
