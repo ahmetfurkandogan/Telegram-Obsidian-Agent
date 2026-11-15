@@ -49,11 +49,13 @@ cd telegram-obsidian-agent
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[test]'
-cp .env.example .env
-chmod 600 .env
+cp .env.example "$HOME/Documents/.telegram-obsidian-agent.env"
+chmod 600 "$HOME/Documents/.telegram-obsidian-agent.env"
 ```
 
-Never commit `.env`. It contains credentials.
+The bot loads `.env` from the project when present. Otherwise it loads the hidden file at `$HOME/Documents/.telegram-obsidian-agent.env`. You can override both with `TELEGRAM_OBSIDIAN_ENV_FILE`.
+
+Never commit any environment file. It contains credentials.
 
 ## Telegram setup
 
@@ -142,7 +144,7 @@ The Markdown note embeds the original attachment and contains frontmatter, a sum
 ## Privacy and security
 
 - Telegram, transcription, LLM, and Obsidian credentials come from environment variables.
-- `.env`, runtime data, staging files, and editor settings are ignored by Git.
+- Environment files, runtime data, staging files, and editor settings are ignored by Git.
 - Only one configured Telegram chat is authorized.
 - Downloads are bounded, signature-checked, hashed, and staged outside the vault.
 - Extracted document text and voice audio are sent only to providers configured in `.env`.
@@ -177,7 +179,7 @@ src/telegram_obsidian_agent/
 | Symptom | Check |
 | --- | --- |
 | Bot does not reply | Confirm the process is running and `TELEGRAM_ALLOWED_CHAT_ID` matches your phone chat. |
-| Telegram authentication error | Regenerate the BotFather token and update `.env`. |
+| Telegram authentication error | Regenerate the BotFather token and update the configured environment file. |
 | Obsidian write failure | Confirm Obsidian is open, the Local REST API plugin is enabled, and the URL, port, API key, and TLS setting match. |
 | AI quota or provider error | The original file still saves using fallback metadata. |
 

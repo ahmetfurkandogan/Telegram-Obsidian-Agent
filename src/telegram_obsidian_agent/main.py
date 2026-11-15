@@ -12,8 +12,15 @@ from .obsidian import ObsidianClient
 from .storage import PendingStore
 
 
+DEFAULT_ENV_FILE = Path.home() / "Documents" / ".telegram-obsidian-agent.env"
+
+
 def load_settings() -> Settings:
-    load_dotenv()
+    configured_env_file = os.environ.get("TELEGRAM_OBSIDIAN_ENV_FILE")
+    env_file = Path(configured_env_file) if configured_env_file else Path(".env")
+    if not env_file.is_file():
+        env_file = DEFAULT_ENV_FILE
+    load_dotenv(dotenv_path=env_file)
     return Settings.from_env(os.environ)
 
 
