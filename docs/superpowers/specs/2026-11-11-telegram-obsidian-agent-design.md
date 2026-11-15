@@ -9,8 +9,8 @@ Amaç, Telegram’ı hızlı bilgi yakalama kutusuna çevirmektir. İlk sürüm 
 ## Mevcut durum
 
 - Bu iş için mevcut proje kodu yok.
-- Yeni proje kökü: `/Users/a.furkan/Documents/Telegram Obsidian Agent`
-- Obsidian vault: `/Users/a.furkan/Documents/Obsidian Vault`
+- Yeni proje kökü: `<project-root>`
+- Obsidian vault: `<obsidian-vault>`
 - Obsidian Local REST API mevcut.
 - REST API yerel HTTP portu `27123`, TLS portu `27124`.
 - API anahtarı yalnızca ortam değişkeninden okunacak.
